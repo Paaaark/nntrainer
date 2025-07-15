@@ -881,6 +881,73 @@ std::vector<unsigned int> FloatTensor::argmin() const {
   return result;
 }
 
+void FloatTensor::topK(unsigned int k, void *output_data,
+                       uint32_t *indices_data) {
+  const auto &input_dim = getDim();
+  const Tformat format = input_dim.getFormat();
+  const auto batch = input_dim.batch();
+  const auto channel = input_dim.channel();
+  const auto height = input_dim.height();
+  const auto width = input_dim.width();
+
+  if (k == 0 || k > width) {
+    throw std::invalid_argument(
+      "k must be greater than 0 and less than or equal to width");
+  }
+
+  float *output_buffer = static_cast<float *>(output_data);
+
+  // Calculate strides for input and output
+  const auto input_strides = input_dim.computeStrides();
+  TensorDim output_dim = input_dim;
+  output_dim.width(k);
+  const auto output_strides = output_dim.computeStrides();
+
+#pragma omp parallel for collapse(3)
+  for (int b = 0; b < static_cast<int>(batch); ++b) {
+    for (int c = 0; c < static_cast<int>(channel); ++c) {
+      for (int h = 0; h < static_cast<int>(height); ++h) {
+
+        size_t offset;
+        if (format == Tformat::NCHW) {
+          // NCHW: [b][c][h][i]
+          offset =
+            b * input_strides[0] + c * input_strides[1] + h * input_strides[2];
+        } else {
+          // NHWC: [b][h][i][c]
+          offset = b * input_strides[0] + h * input_strides[1] + c;
+        }
+
+        const unsigned int width_stride =
+          format == Tformat::NHWC ? input_strides[2] : 1;
+        const float *B = static_cast<const float *>(getData()) + offset;
+        std::vector<size_t> idx(width);
+        std::iota(idx.begin(), idx.end(), 0);
+        std::partial_sort(idx.begin(), idx.begin() + k, idx.end(),
+                          [&B, width_stride](size_t i1, size_t i2) {
+                            return B[i1 * width_stride] > B[i2 * width_stride];
+                          });
+
+        // write top-k values and their indices to output
+        for (unsigned int i = 0; i < k; ++i) {
+          size_t output_idx;
+          if (format == Tformat::NCHW) {
+            // NCHW: [b][c][h][i]
+            output_idx = b * output_strides[0] + c * output_strides[1] +
+                         h * output_strides[2] + i;
+          } else {
+            // NHWC: [b][h][i][c]
+            output_idx = b * output_strides[0] + h * output_strides[1] +
+                         i * output_strides[2] + c;
+          }
+          output_buffer[output_idx] = B[idx[i]];
+          indices_data[output_idx] = static_cast<uint32_t>(idx[i]);
+        }
+      }
+    }
+  }
+}
+
 float FloatTensor::max_abs() const {
   const float *data = (float *)getData();
   unsigned int idx = isamax(size(), data, 1);

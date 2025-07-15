@@ -131,6 +131,18 @@ void TensorBase::updateBatch(unsigned int batch) {
   dim.batch(batch);
 }
 
+void TensorBase::updateDimension(TensorDim dimension) {
+  if (dim == dimension) {
+    return;
+  }
+
+  if (isAllocated())
+    throw std::invalid_argument(
+      "Cannot update tensor dimension for an allocated tensor");
+
+  dim = dimension;
+}
+
 size_t TensorBase::getIndex(unsigned int b, unsigned int c, unsigned int h,
                             unsigned int w) const noexcept {
   if (getFormat() == Tformat::NCHW) {
@@ -598,6 +610,12 @@ std::vector<unsigned int> TensorBase::argmax() const {
 std::vector<unsigned int> TensorBase::argmin() const {
   throw std::invalid_argument(
     "Tensor::argmin() is currently not supported in tensor data type " +
+    getStringDataType());
+}
+
+void TensorBase::topK(unsigned int k, void *output_data, uint32_t *indices) {
+  throw std::invalid_argument(
+    "Tensor::topK() is currently not supported in tensor data type " +
     getStringDataType());
 }
 

@@ -1605,6 +1605,35 @@ public:
   std::vector<unsigned int> argmin() const;
 
   /**
+   * @brief Find top-K maximum values along the width dimension and return
+   * results as tensors
+   *
+   * @details This function computes the top-K maximum values and their
+   * corresponding indices along the **width** dimension for each batch,
+   * channel, and height slice. The operation preserves the original tensor
+   * format (NCHW/NHWC) while reducing the width dimension to size K. The
+   * indices are returned as a separate tensor of type `UINT32`.
+   *
+   * @param[in] k Number of largest elements to select (1 <= k <= width_size)
+   *
+   * @return std::pair<Tensor, Tensor> containing:
+   *         - First: Output tensor of shape [batch][channel][height][k] (NCHW)
+   * or [batch][height][k][channel] (NHWC) with top-K values
+   *         - Second: Indices tensor of shape [batch][channel][height][k]
+   * (NCHW) or [batch][height][k][channel] (NHWC) with original width positions
+   *
+   * @throw std::invalid_argument If:
+   *         - k is 0 or exceeds width dimension size
+   *         - Called on non-floating point tensor (UINT8/UINT16/etc)
+   *
+   * @note
+   * - Indices represent positions in the **original width dimension**
+   * - Sorting is done in descending order
+   * - Preserves tensor format (NCHW/NHWC) of the original tensor
+   */
+  std::pair<Tensor, Tensor> topK(unsigned int k) const;
+
+  /**
    * @brief     return max of the absolute values of the tensor
    * @retval    maximum absolute value
    */
@@ -1707,6 +1736,14 @@ public:
    * updateBatch and then allocate again to avoid such issues.
    */
   void updateBatch(unsigned int batch);
+
+  /**
+   * @brief     update the dimension for this tensor
+   * @param     dimension dimension to be updated
+   * @note      if this tensor is allocated this will throw an error.
+   * @note      we assume that the caller checks if the tensor is not allocated
+   */
+  void updateDimension(TensorDim dimension);
 
   /**
    * @brief     return whether tensor is contiguous or not.

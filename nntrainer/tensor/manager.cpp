@@ -812,7 +812,7 @@ void Manager::LoadTensors(unsigned int order,
 
   auto enqueTasks = [&](unsigned int o) {
     auto load_weight = loadTensorsAsync(weight_pool, o);
-    ml_logd("load weigth is requested in LoadTensors with order - %d", o);
+    ml_logd("load weight is requested in LoadTensors with order - %d", o);
     int load_tensor = 0;
 
     if (exec_mode != ml::train::ExecutionMode::INFERENCE) {

@@ -331,6 +331,28 @@ void NetworkGraph::setBatchSize(unsigned int batch_size) {
     label_dims[idx] = tensor_manager->getTensor(label_list[idx])->getDim();
 }
 
+void NetworkGraph::resetInputDimension(std::vector<TensorDim> dims) {
+  auto allocated = tensor_manager->isAllocated();
+
+  if (allocated)
+    deallocateTensors();
+
+  for (auto iter = cbegin(); iter != cend(); iter++) {
+    if ((*iter)->isFinalized()) {
+      (*iter)->updateTensorsByInputDimensions(dims);
+    }
+  }
+
+  if (allocated)
+    allocateTensors(exec_mode);
+
+  /** update input and label dimensions */
+  for (unsigned int idx = 0; idx < input_list.size(); idx++)
+    input_dims[idx] = tensor_manager->getTensor(input_list[idx])->getDim();
+  for (unsigned int idx = 0; idx < label_list.size(); idx++)
+    label_dims[idx] = tensor_manager->getTensor(label_list[idx])->getDim();
+}
+
 void NetworkGraph::applyGradients(
   LayerNode *node, const std::function<void(Weight &)> &apply_func) {
   if (!node->getTrainable())
@@ -754,7 +776,7 @@ NetworkGraph::finalizeContext(const std::shared_ptr<LayerNode> &lnode,
 
   /** finalize the layer and get the final context */
   auto init_context = lnode->finalize(input_dims, getTensorType(), exec_mode);
-  auto ct_engine = nntrainer::Engine::Global();
+  const auto &ct_engine = nntrainer::Engine::Global();
 
   /**
    * Request manager for either a pre-allocated output as input or a newly
@@ -947,7 +969,7 @@ NetworkGraph::refinalizeContext(const std::shared_ptr<LayerNode> &lnode,
 
   /** refinalize the layer and get the final context */
   auto init_context = lnode->refinalize(input_dims);
-  auto ct_engine = nntrainer::Engine::Global();
+  const auto &ct_engine = nntrainer::Engine::Global();
 
   /**
    * Request manager for either a pre-allocated output as input or a newly

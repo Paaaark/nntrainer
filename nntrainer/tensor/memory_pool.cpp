@@ -166,7 +166,17 @@ void MemoryPool::allocate() {
   mem_pool = calloc(1, 1);
 
 #else
+
+#ifdef ENABLE_OPENCL
+  mem_pool = cl_context_->context_inst_.createSVMRegion(pool_size);
+
+  if (mem_pool == nullptr) {
+    throw std::runtime_error("Failed to allocate SVM memory pool of size " +
+                             std::to_string(pool_size) + " bytes");
+  }
+#else
   mem_pool = calloc(pool_size, 1);
+#endif
 
   unsigned int idx = 1;
   for (auto &s : memory_offset) {
@@ -257,7 +267,11 @@ std::shared_ptr<MemoryData> MemoryPool::getMemory(unsigned int idx) {
  */
 void MemoryPool::deallocate() {
   if (mem_pool != nullptr) {
+#ifdef ENABLE_OPENCL
+    cl_context_->context_inst_.releaseSVMRegion(mem_pool);
+#else
     free(mem_pool);
+#endif
     memory_size.clear();
     memory_validity.clear();
     memory_exec_order.clear();

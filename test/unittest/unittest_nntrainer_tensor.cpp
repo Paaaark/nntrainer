@@ -4593,6 +4593,171 @@ TEST(nntrainer_Tensor, argmax_03_p) {
   EXPECT_EQ(target.argmax(), std::vector<unsigned int>({2, 6, 2}));
 }
 
+TEST(nntrainer_Tensor, topK_supported_fp32_p) {
+  nntrainer::Tensor input(3, 1, 5, 6, nntrainer::Tformat::NCHW,
+                          nntrainer::Tdatatype::FP32);
+  EXPECT_NO_THROW(input.topK(2));
+}
+
+TEST(nntrainer_Tensor, topK_unsupported_uint_n) {
+  nntrainer::Tensor input(3, 1, 5, 6, nntrainer::Tformat::NCHW,
+                          nntrainer::Tdatatype::UINT16);
+  EXPECT_THROW(input.topK(2), std::invalid_argument);
+}
+
+TEST(nntrainer_Tensor, topK_invalid_k_n) {
+  // NHWC: [batch=1][height=2]
+  std::vector<std::vector<std::vector<std::vector<float>>>> data = {
+    {{{5.0f}, {3.0f}}}};
+
+  nntrainer::Tensor input(
+    data, {nntrainer::Tformat::NHWC, nntrainer::Tdatatype::FP32});
+
+  EXPECT_THROW(input.topK(0), std::invalid_argument);
+  EXPECT_THROW(input.topK(3), std::invalid_argument);
+}
+
+TEST(nntrainer_Tensor, topk_basic_nchw_p) {
+  // NCHW: [1(batch),1(height),1(channel),4(width)]
+  std::vector<std::vector<std::vector<std::vector<float>>>> data = {
+    {{{3.0f, 1.0f, 4.0f, 2.0f}}}};
+  nntrainer::Tensor input(
+    data, {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP32});
+
+  auto [output, indices] = input.topK(2);
+
+  // validate value (top 2 values)
+  EXPECT_FLOAT_EQ(output.getData<float>()[0], 4.0f); // width=2
+  EXPECT_FLOAT_EQ(output.getData<float>()[1], 3.0f); // width=0
+
+  // validate indices (top 2 indices)
+  EXPECT_EQ(indices.getValue<uint32_t>(0), 2u);
+  EXPECT_EQ(indices.getValue<uint32_t>(1), 0u);
+}
+
+TEST(nntrainer_Tensor, topK_basic_nhwc_p) {
+  // NHWC: [batch=1, height=1, width=4, channel=1]
+  std::vector<std::vector<std::vector<std::vector<float>>>> nhwc_data = {
+    {// batch=0
+     {
+       // height=0
+       {3.0f}, // width=0
+       {1.0f}, // width=1
+       {4.0f}, // width=2
+       {2.0f}  // width=3
+     }}};
+
+  nntrainer::Tensor input(
+    nhwc_data, {nntrainer::Tformat::NHWC, nntrainer::Tdatatype::FP32});
+
+  auto [output, indices] = input.topK(2);
+
+  EXPECT_FLOAT_EQ(output.getValue<float>(0), 4.0f);
+  EXPECT_FLOAT_EQ(output.getValue<float>(1), 3.0f);
+  EXPECT_EQ(indices.getValue<uint32_t>(0), 2u);
+  EXPECT_EQ(indices.getValue<uint32_t>(1), 0u);
+}
+
+TEST(nntrainer_Tensor, topK_nchw_multi_height_p) {
+  // NCHW: [batch=2][channel=1][height=2][width=3]
+  std::vector<std::vector<std::vector<std::vector<float>>>> nchw_data = {
+    {// Batch 0
+     {
+       // Channel 0
+       {5.0f, 2.0f, 7.0f}, // Height 0: [w0,w1,w2]
+       {1.0f, 9.0f, 4.0f}  // Height 1: [w0,w1,w2]
+     }},
+    {// Batch 1
+     {
+       // Channel 0
+       {8.0f, 3.0f, 6.0f}, // Height 0: [w0,w1,w2]
+       {2.0f, 5.0f, 1.0f}  // Height 1: [w0,w1,w2]
+     }}};
+
+  nntrainer::Tensor input(
+    nchw_data, {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP32});
+
+  // Perform topK along width dimension for each height slice
+  auto [output, indices] = input.topK(2);
+
+  /** Expected output structure (NCHW)
+  [batch][channel][height][k]
+  Batch 0:
+      Height 0: [7.0 (w=2), 5.0 (w=0)]
+      Height 1: [9.0 (w=1), 4.0 (w=2)]
+  Batch 1:
+      Height 0: [8.0 (w=0), 6.0 (w=2)]
+      Height 1: [5.0 (w=1), 2.0 (w=0)]
+  */
+
+  // Batch 0 - Height 0
+  EXPECT_FLOAT_EQ(output.getValue<float>(0, 0, 0, 0), 7.0f); // w=2
+  EXPECT_FLOAT_EQ(output.getValue<float>(0, 0, 0, 1), 5.0f); // w=0
+
+  // Batch 0 - Height 1
+  EXPECT_FLOAT_EQ(output.getValue<float>(0, 0, 1, 0), 9.0f); // w=1
+  EXPECT_FLOAT_EQ(output.getValue<float>(0, 0, 1, 1), 4.0f); // w=2
+
+  // Batch 1 - Height 0
+  EXPECT_FLOAT_EQ(output.getValue<float>(1, 0, 0, 0), 8.0f); // w=0
+  EXPECT_FLOAT_EQ(output.getValue<float>(1, 0, 0, 1), 6.0f); // w=2
+
+  // Batch 1 - Height 1
+  EXPECT_FLOAT_EQ(output.getValue<float>(1, 0, 1, 0), 5.0f); // w=1
+  EXPECT_FLOAT_EQ(output.getValue<float>(1, 0, 1, 1), 2.0f); // w=0
+
+  /** Index validation (original width positions)
+  indices[batch][height][k] */
+
+  // Batch 0 - Height 0
+  EXPECT_EQ(indices.getValue<uint32_t>(0, 0, 0, 0), 2u); // w=2 (7.0f)
+  EXPECT_EQ(indices.getValue<uint32_t>(0, 0, 0, 1), 0u); // w=0 (5.0f)
+
+  // Batch 0 - Height 1
+  EXPECT_EQ(indices.getValue<uint32_t>(0, 0, 1, 0), 1u); // w=1 (9.0f)
+  EXPECT_EQ(indices.getValue<uint32_t>(0, 0, 1, 1), 2u); // w=2 (4.0f)
+
+  // Batch 1 - Height 0
+  EXPECT_EQ(indices.getValue<uint32_t>(1, 0, 0, 0), 0u); // w=0 (8.0f)
+  EXPECT_EQ(indices.getValue<uint32_t>(1, 0, 0, 1), 2u); // w=2 (6.0f)
+
+  // Batch 1 - Height 1
+  EXPECT_EQ(indices.getValue<uint32_t>(1, 0, 1, 0), 1u);
+  EXPECT_EQ(indices.getValue<uint32_t>(1, 0, 1, 1), 0u);
+}
+
+TEST(nntrainer_Tensor, topK_negative_values_p) {
+  // NCHW: [batch=1][channel=1][height=1][width=5]
+  std::vector<std::vector<std::vector<std::vector<float>>>> data = {
+    {{{-3.2f, -9.1f, -1.5f, -4.7f, -2.3f}}}};
+
+  nntrainer::Tensor input(
+    data, {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP32});
+
+  auto [output, indices] = input.topK(3);
+
+  const std::vector<float> expected_values = {-1.5f, -2.3f, -3.2f};
+  const std::vector<uint32_t> expected_indices = {2, 4, 0};
+  for (size_t i = 0; i < 3; ++i) {
+    EXPECT_FLOAT_EQ(output.getData<float>()[i], expected_values[i]);
+    EXPECT_EQ(indices.getData<uint32_t>()[i], expected_indices[i]);
+  }
+}
+
+TEST(nntrainer_Tensor, topK_multi_channel_p) {
+  // NCHW: [batch=1][channel=3][height=2]
+  std::vector<std::vector<std::vector<std::vector<float>>>> data = {
+    {{{5.1f}, {9.4f}, {2.3f}, {3.8f}, {8.7f}, {6.5f}}}};
+
+  nntrainer::Tensor input(
+    data, {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP32});
+
+  auto [output, indices] = input.topK(1);
+
+  EXPECT_FLOAT_EQ(output.getValue<float>(0), 5.1f);
+  EXPECT_FLOAT_EQ(output.getValue<float>(2), 2.3f);
+}
+
 TEST(nntrainer_Tensor, max_element_01_p) {
   int batch = 3;
   int channel = 1;
@@ -6492,7 +6657,7 @@ TEST(nntrainer_Tensor, inv_sqrt_i_uncontiguous_p) {
 }
 
 /**
- * @brief float tensor has NaN
+ * @brief float tensor has NaN (16 float vec)
  */
 TEST(nntrainer_Tensor, is_valid_01) {
   size_t batch = 1;
@@ -6511,6 +6676,78 @@ TEST(nntrainer_Tensor, is_valid_01) {
   EXPECT_EQ(input.isValid(), true);
 
   input.setValue(0, 0, 0, 0, std::nanf("1"));
+
+  EXPECT_EQ(input.isValid(), false);
+
+  input.setValue(0, 0, 0, 0, std::numeric_limits<float>::infinity());
+
+  EXPECT_EQ(input.isValid(), false);
+
+  input.setValue(0, 0, 0, 0, -std::numeric_limits<float>::infinity());
+
+  EXPECT_EQ(input.isValid(), false);
+}
+
+/**
+ * @brief float tensor has NaN (8 float vec)
+ */
+TEST(nntrainer_Tensor, is_valid_02) {
+  size_t batch = 1;
+  size_t channel = 2;
+  size_t height = 2;
+  size_t width = 2;
+
+  nntrainer::Tensor input(
+    {batch,
+     channel,
+     height,
+     width,
+     {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP32}},
+    true, nntrainer::Initializer::ZEROS);
+
+  EXPECT_EQ(input.isValid(), true);
+
+  input.setValue(0, 0, 0, 0, std::nanf("1"));
+
+  EXPECT_EQ(input.isValid(), false);
+
+  input.setValue(0, 0, 0, 0, std::numeric_limits<float>::infinity());
+
+  EXPECT_EQ(input.isValid(), false);
+
+  input.setValue(0, 0, 0, 0, -std::numeric_limits<float>::infinity());
+
+  EXPECT_EQ(input.isValid(), false);
+}
+
+/**
+ * @brief float tensor has NaN (1 float)
+ */
+TEST(nntrainer_Tensor, is_valid_03) {
+  size_t batch = 1;
+  size_t channel = 1;
+  size_t height = 1;
+  size_t width = 1;
+
+  nntrainer::Tensor input(
+    {batch,
+     channel,
+     height,
+     width,
+     {nntrainer::Tformat::NCHW, nntrainer::Tdatatype::FP32}},
+    true, nntrainer::Initializer::ZEROS);
+
+  EXPECT_EQ(input.isValid(), true);
+
+  input.setValue(0, 0, 0, 0, std::nanf("1"));
+
+  EXPECT_EQ(input.isValid(), false);
+
+  input.setValue(0, 0, 0, 0, std::numeric_limits<float>::infinity());
+
+  EXPECT_EQ(input.isValid(), false);
+
+  input.setValue(0, 0, 0, 0, -std::numeric_limits<float>::infinity());
 
   EXPECT_EQ(input.isValid(), false);
 }
